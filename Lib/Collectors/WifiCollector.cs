@@ -21,7 +21,7 @@ namespace AttackSurfaceAnalyzer.Collectors
 
         public override bool CanRunOnPlatform()
         {
-            return RuntimeInformation.IsOSPlatform(OSPlatform.OSX) || RuntimeInformation.IsOSPlatform(OSPlatform.Windows);
+            return RuntimeInformation.IsOSPlatform(OSPlatform.OSX) || RuntimeInformation.IsOSPlatform(OSPlatform.Windows) || RuntimeInformation.IsOSPlatform(OSPlatform.Linux);
         }
 
         internal override void ExecuteInternal(CancellationToken token)
@@ -34,6 +34,47 @@ namespace AttackSurfaceAnalyzer.Collectors
             {
                 ExecuteWindows(token);
             }
+            else if (RuntimeInformation.IsOSPlatform(OSPlatform.Linux))
+            {
+                ExecuteLinux(token);
+            }
+        }
+
+        internal void ExecuteLinux(CancellationToken token)
+        {
+            var networks = Directory.EnumerateFiles("/etc/NetworkManager/system-connections/");
+            if (opts.SingleThread)
+            {
+                foreach (var network in networks)
+                {
+                    if (token.IsCancellationRequested)
+                    {
+                        break;
+                    }
+                    var lines = File.ReadAllLines(network);
+                    var entry = new WifiObject(lines.Where(x => x.StartsWith("id")).Take(1).Select(x => x.Substring(3)).First())
+                    {
+                        Encryption = lines.Where(x => x.StartsWith("key-mgmt")).Take(1).Select(x => x.Substring(9)).FirstOrDefault() ?? string.Empty,
+                        Authentication = lines.Where(x => x.StartsWith("auth-alg")).Take(1).Select(x => x.Substring(8)).FirstOrDefault() ?? string.Empty
+                    };
+                    HandleChange(entry);
+                }
+            }
+            else
+            {
+                Parallel.ForEach(networks, new ParallelOptions() { CancellationToken = token }, network =>
+                {
+                    var lines = File.ReadAllLines(network);
+                    var entry = new WifiObject(lines.Where(x => x.StartsWith("id")).Take(1).Select(x => x.Substring(3)).First())
+                    {
+                        Encryption = lines.Where(x => x.StartsWith("key-mgmt")).Take(1).Select(x => x.Substring(9)).FirstOrDefault() ?? string.Empty,
+                        Authentication = lines.Where(x => x.StartsWith("auth-alg")).Take(1).Select(x => x.Substring(8)).FirstOrDefault() ?? string.Empty
+                    };
+                    HandleChange(entry);
+                });
+            }
+
+
         }
 
         internal void ExecuteMacOs(CancellationToken token)
